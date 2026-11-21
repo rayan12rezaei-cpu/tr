@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ببر فراری</title>
+<style>
+:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;overflow:hidden;background:#0f2a14;font-family:Tahoma,system-ui,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);left:0;right:0;display:flex;justify-content:space-between;padding:0 16px;font-size:18px;font-weight:bold;text-shadow:0 2px 4px #000a;pointer-events:none}
+#ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a1f0ecc;text-align:center;padding:20px;gap:10px}
+#ov h1{font-size:44px;margin:0;color:#ffa726;text-shadow:0 3px 8px #000}
+#ov p{margin:2px 0;font-size:16px;line-height:1.8;opacity:.92}
+button{font:inherit;font-size:20px;font-weight:bold;padding:12px 38px;border:0;border-radius:30px;background:#ff9a1f;color:#2a1500;cursor:pointer;margin-top:8px}
+button:active{transform:scale(.96)}
+#bar{position:fixed;top:calc(env(safe-area-inset-top,0px) + 42px);left:50%;transform:translateX(-50%);width:130px;height:8px;border-radius:5px;background:#0006;overflow:hidden;pointer-events:none;direction:ltr}
+#bi{display:block;height:100%;width:100%;background:linear-gradient(90deg,#e53935,#ffb300,#43a047)}
+#mu{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);left:12px;font-size:20px;padding:6px 12px;margin:0;background:#0007;color:#fff;border-radius:20px}
+</style>
+</head>
+<body>
+<div id="hud"><span id="sc">امتیاز: ۰</span><span id="co">🪙 ۰</span><span id="bs">رکورد: ۰</span></div>
+<div id="bar"><i id="bi"></i></div>
+<button id="mu">🔊</button>
+<div id="ov">
+  <h1>🐯 ببر فراری</h1>
+  <p id="msg">از دست شکارچی‌ها فرار کن!<br>کلیدهای ← → یا A/D برای تغییر مسیر، فاصله (Space) یا ↑ برای پرش، ↓ یا S برای خم شدن<br>در موبایل: سوایپ چپ/راست برای مسیر، سوایپ بالا یا ضربه برای پرش، سوایپ پایین برای خم شدن (در هوا: افتادن سریع)<br>نوار بالا فاصله‌ی تو تا شکارچی است؛ هر برخورد او را نزدیک‌تر می‌کند!</p>
+  <button id="go">شروع بازی</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const fa=n=>String(Math.floor(n)).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);
+let best=0;try{best=+localStorage.getItem('tigerBest')||0}catch(e){}
+$('bs').textContent='رکورد: '+fa(best);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9fd3a5);
+scene.fog=new THREE.Fog(0x9fd3a5,25,110);
+const cam=new THREE.PerspectiveCamera(65,1,.1,200);
+const ren=new THREE.WebGLRenderer({antialias:true});
+ren.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.prepend(ren.domElement);
+function resize(){ren.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.fov=innerWidth<innerHeight?78:52;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x3a5a2a,.9));
+const sun=new THREE.DirectionalLight(0xfff2cc,.8);sun.position.set(5,12,6);scene.add(sun);
+
+const M=(c)=>new THREE.MeshLambertMaterial({color:c});
+const box=(w,h,d,c)=>new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(c));
+
+// ground
+const g=new THREE.Mesh(new THREE.PlaneGeometry(120,320),M(0x2f7a35));
+g.rotation.x=-Math.PI/2;g.position.z=-130;scene.add(g);
+const cv=document.createElement('canvas');cv.width=cv.height=64;
+const cx=cv.getContext('2d');cx.fillStyle='#8a6a43';cx.fillRect(0,0,64,64);
+for(let i=0;i<40;i++){cx.fillStyle=Math.random()<.5?'#755733':'#9c7b50';cx.fillRect(Math.random()*64,Math.random()*64,4+Math.random()*6,3)}
+cx.fillStyle='#6b4f2c';cx.fillRect(0,0,64,2);
+const tex=new THREE.CanvasTexture(cv);tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(2,64);
+const path=new THREE.Mesh(new THREE.PlaneGeometry(8,320),new THREE.MeshLambertMaterial({map:tex}));
+path.rotation.x=-Math.PI/2;path.position.set(0,.02,-130);scene.add(path);
+
+// trees
+const trees=[];
+function mkTree(){
+  const t=new THREE.Group();
+  const h=2+Math.random()*3;
+  const tr=new THREE.Mesh(new THREE.CylinderGeometry(.4,.55,h,6),M(0x5a3a1e));tr.position.y=h/2;t.add(tr);
+  const col=[0x1e6b2b,0x278a35,0x175c25][Math.floor(Math.random()*3)];
+  for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.ConeGeometry(2.6-i*.6,2.8,7),M(col));c.position.y=h+i*1.5;t.add(c)}
+  return t;
+}
+for(let i=0;i<44;i++){
+  const t=mkTree();const side=i%2?1:-1;
+  t.position.set(side*(6+Math.random()*14),0,-Math.random()*130+5);
+  t.userData.side=side;scene.add(t);trees.push(t);
+}
+
+// tiger
+const tiger=new THREE.Group();
+const OR=0xff8a1c,BK=0x1a1a1a;
+const body=box(.95,.85,1.7,OR);body.position.y=1.05;tiger.add(body);
+for(let i=0;i<4;i++){const s=box(.98,.88,.14,BK);s.position.set(0,1.05,-.6+i*.4);tiger.add(s)}
+const head=new THREE.Group();head.position.set(0,1.4,-1.0);tiger.add(head);
+head.add(box(.85,.75,.75,OR));
+const mz=box(.5,.3,.2,0xfff0dd);mz.position.set(0,-.15,-.4);head.add(mz);
+const nose=box(.14,.1,.06,0x222222);nose.position.set(0,-.05,-.52);head.add(nose);
+[-.2,.2].forEach(x=>{const e=box(.12,.12,.05,0xffee55);e.position.set(x,.12,-.38);head.add(e);
+  const p=box(.05,.05,.06,BK);p.position.set(x,.12,-.4);head.add(p);
+  const er=box(.2,.22,.12,OR);er.position.set(x*1.7,.46,0);head.add(er)});
+for(let i=-1;i<=1;i+=2){const s=box(.08,.3,.05,BK);s.position.set(i*.2,.3,-.38);head.add(s)}
+const tail=new THREE.Group();tail.position.set(0,1.3,.85);tiger.add(tail);
+const tb=box(.18,.18,1.1,OR);tb.position.z=.55;tail.add(tb);
+const tt=box(.2,.2,.25,BK);tt.position.z=1.15;tail.add(tt);
+const legs=[];
+[[-.32,-.6],[.32,-.6],[-.32,.6],[.32,.6]].forEach(([x,z],i)=>{
+  const l=new THREE.Group();l.position.set(x,.65,z);
+  const m=box(.26,.7,.26,OR);m.position.y=-.3;l.add(m);
+  const f=box(.3,.12,.34,BK);f.position.set(0,-.62,-.04);l.add(f);
+  l.userData.ph=(i===0||i===3)?0:Math.PI;tiger.add(l);legs.push(l);
+});
+scene.add(tiger);
+
+// hunter
+const hunter=new THREE.Group();
+const hb=box(.8,1.1,.5,0x4a6b3a);hb.position.y=1.5;hunter.add(hb);
+const hh=box(.5,.5,.5,0xe0b48a);hh.position.y=2.35;hunter.add(hh);
+const hat=box(.85,.12,.85,0x5a3a1e);hat.position.y=2.65;hunter.add(hat);
+const hat2=box(.5,.25,.5,0x5a3a1e);hat2.position.y=2.8;hunter.add(hat2);
+const gun=box(.1,.1,1.4,0x222222);gun.position.set(.45,1.7,-.5);hunter.add(gun);
+const hl=[];[-.2,.2].forEach((x,i)=>{const l=new THREE.Group();l.position.set(x,1,0);const m=box(.28,1,.3,0x3b3b2a);m.position.y=-.5;l.add(m);l.userData.ph=i*Math.PI;hunter.add(l);hl.push(l)});
+hunter.scale.setScalar(.65);hunter.position.z=3.7;scene.add(hunter);
+
+// audio
+let AC=null,muted=false;
+function initAudio(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume()}
+function sfx(f,d,type,v,f2){if(!AC||muted)return;try{const n=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();o.type=type||'square';o.frequency.setValueAtTime(f,n);if(f2)o.frequency.exponentialRampToValueAtTime(f2,n+d);g.gain.setValueAtTime(v||.15,n);g.gain.exponentialRampToValueAtTime(.001,n+d);o.connect(g);g.connect(AC.destination);o.start(n);o.stop(n+d)}catch(e){}}
+$('mu').onclick=()=>{muted=!muted;$('mu').textContent=muted?'🔇':'🔊'};
+$('mu').addEventListener('touchstart',e=>e.stopPropagation());
+$('mu').addEventListener('touchend',e=>e.stopPropagation());
+
+// game state
+const LX=[-2.4,0,2.4];
+let st='ready',lane=1,vy=0,y=0,dist=0,coins=0,speed=14,t=0,spawnD=0,shake=0,gap=9,inv=0,slideT=0,wantSlide=false,stepT=0,beatT=0,beat=0;
+const objs=[];
+
+function clearObjs(){objs.forEach(o=>scene.remove(o.m));objs.length=0}
+function addObj(type,x,z){
+  let m;
+  if(type==='river'){
+    m=new THREE.Group();const w=new THREE.Mesh(new THREE.PlaneGeometry(8.4,5),new THREE.MeshLambertMaterial({color:0x2e7fd6}));w.rotation.x=-Math.PI/2;w.position.y=.05;m.add(w);
+    [-2.5,2.5].forEach(zz=>{const b=box(8.4,.14,.4,0x5b4630);b.position.set(0,.08,zz);m.add(b)});
+    m.position.set(0,0,z);
+  }else if(type==='branch'){
+    m=new THREE.Group();const br=new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,9.4,8),M(0x5a3a1e));br.rotation.z=Math.PI/2;br.position.y=1.9;m.add(br);
+    [-4.6,4.6].forEach(px=>{const p=box(.6,3.2,.6,0x5a3a1e);p.position.set(px,1.6,0);m.add(p)});
+    [-2.4,.5,2.8].forEach(px=>{const l=box(1.6,.5,1.2,0x1e6b2b);l.position.set(px,2.15,0);m.add(l)});
+    m.position.z=z;
+  }else if(type==='log'){
+    m=new THREE.Mesh(new THREE.CylinderGeometry(.42,.42,7.6,10),M(0x6b4423));
+    m.rotation.z=Math.PI/2;m.position.set(0,.42,z);
+  }else if(type==='rock'){
+    m=new THREE.Mesh(new THREE.DodecahedronGeometry(1.15),M(0x7d8087));
+    m.scale.set(1,1.5,1);m.position.set(x,1.1,z);
+  }else{
+    m=new THREE.Mesh(new THREE.CylinderGeometry(.4,.4,.12,16),M(0xffcc1a));
+    m.rotation.x=Math.PI/2;m.position.set(x,1.1,z);
+  }
+  scene.add(m);objs.push({type,m,x});
+}
+function spawn(){
+  const z=-95,r=Math.random();
+  if(r<.14){addObj('river',0,z-2)}
+  else if(r<.3){addObj('branch',0,z)}
+  else if(r<.46){addObj('log',0,z)}
+  else if(r<.72){
+    const a=Math.floor(Math.random()*3);addObj('rock',LX[a],z);
+    if(Math.random()<.5){addObj('rock',LX[(a+1+Math.floor(Math.random()*2))%3],z)}
+  }else{
+    const l=Math.floor(Math.random()*3);for(let i=0;i<5;i++)addObj('coin',LX[l],z-i*2.2);
+  }
+}
+
+function start(){
+  clearObjs();lane=1;y=0;vy=0;dist=0;coins=0;speed=14;spawnD=0;tiger.position.set(0,0,0);tiger.rotation.set(0,0,0);tiger.scale.set(1,1,1);gap=9;inv=0;slideT=0;wantSlide=false;initAudio();sfx(440,.3,'square',.12,880);
+  st='play';$('ov').style.display='none';
+}
+function over(){
+  st='over';shake=.5;sfx(300,.8,'sawtooth',.2,40);
+  const sc=Math.floor(dist/2)+coins*10;
+  if(sc>best){best=sc;try{localStorage.setItem('tigerBest',best)}catch(e){}}
+  $('bs').textContent='رکورد: '+fa(best);
+  $('msg').innerHTML='شکارچی‌ها تو رو گرفتن! 😵<br>امتیاز تو: <b>'+fa(sc)+'</b> — رکورد: <b>'+fa(best)+'</b>';
+  $('go').textContent='دوباره';
+  setTimeout(()=>{$('ov').style.display='flex'},700);
+}
+function hit(){if(inv>0||st!=='play')return;gap-=4;speed=Math.max(14,speed*.78);inv=1.6;shake=.35;sfx(160,.3,'sawtooth',.2,60);if(gap<=2.5){gap=2.5;over()}}
+$('go').onclick=start;
+$('go').addEventListener('touchstart',e=>e.stopPropagation());
+
+function jump(){if(st==='play'&&y<=.01){vy=11.5;slideT=0;sfx(330,.18,'square',.12,660)}}
+function slide(){if(st!=='play')return;if(y>.05){vy=-30;wantSlide=true}else if(slideT<=0){slideT=.75;sfx(220,.25,'triangle',.15,90)}}
+function move(d){if(st==='play')lane=Math.max(0,Math.min(2,lane+d))}
+addEventListener('keydown',e=>{
+  const k=e.key;
+  if(k==='ArrowLeft'||k==='a'||k==='A')move(-1);
+  else if(k==='ArrowRight'||k==='d'||k==='D')move(1);
+  else if(k==='ArrowUp'||k===' '||k==='w'||k==='W'){jump();e.preventDefault()}
+  else if(k==='ArrowDown'||k==='s'||k==='S'){slide();e.preventDefault()}
+  else if(k==='Enter'&&st!=='play')start();
+});
+let sx=0,sy=0;
+addEventListener('touchstart',e=>{if(e.target.id==='go')return;sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
+addEventListener('touchend',e=>{
+  if(e.target.id==='go')return;
+  const c=e.changedTouches[0],dx=c.clientX-sx,dy=c.clientY-sy;
+  if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy))move(dx>0?1:-1);
+  else if(dy<-30)jump();
+  else if(dy>30)slide();
+  else if(Math.abs(dx)<12&&Math.abs(dy)<12)jump();
+},{passive:true});
+
+let last=performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt=Math.min((now-last)/1000,.05);last=now;t+=dt;
+  const run=st==='play'||st==='ready';
+  const sp=st==='play'?speed:(st==='ready'?8:0);
+
+  if(st==='play'){
+    speed=Math.min(34,speed+dt*.35);
+    dist+=sp*dt;
+    tiger.position.x+=(LX[lane]-tiger.position.x)*Math.min(1,dt*12);
+    vy-=32*dt;y+=vy*dt;if(y<0){if(vy<-2)sfx(90,.12,'sine',.25,50);y=0;vy=0;if(wantSlide){wantSlide=false;slideT=.7}}
+    tiger.position.y=y;
+    slideT=Math.max(0,slideT-dt);inv=Math.max(0,inv-dt);gap=Math.min(9,gap+dt*.45);
+    stepT+=dt;if(y<=.01&&stepT>.24*14/speed){stepT=0;sfx(70+Math.random()*20,.08,'sine',.18,40)}
+    beatT+=dt;if(beatT>.3){beatT=0;sfx([110,110,165,110,131,131,196,131][beat++%8],.25,'triangle',.07)}
+    tiger.rotation.z=(LX[lane]-tiger.position.x)*-.08;
+    spawnD+=sp*dt;
+    if(spawnD>16-Math.min(6,speed/6)){spawnD=0;spawn()}
+    $('sc').textContent='امتیاز: '+fa(dist/2+coins*10);
+    $('co').textContent='🪙 '+fa(coins);
+  }
+  tex.offset.y+=sp*dt/5;
+
+  // move world
+  for(const t of trees){
+    t.position.z+=sp*dt;
+    if(t.position.z>12){t.position.z=-125-Math.random()*10;t.position.x=t.userData.side*(6+Math.random()*14)}
+  }
+  for(let i=objs.length-1;i>=0;i--){
+    const o=objs[i],m=o.m;
+    m.position.z+=sp*dt;
+    if(o.type==='coin')m.rotation.z+=dt*5;
+    if(st==='play'&&Math.abs(m.position.z)<(o.type==='river'?2.4:.9)){
+      const tx=tiger.position.x;
+      if(o.type==='coin'){
+        if(Math.abs(m.position.x-tx)<1&&Math.abs(y-.0)<2.2){coins++;sfx(880,.15,'square',.1,1320);scene.remove(m);objs.splice(i,1);continue}
+      }else if(o.type==='river'){
+        if(y<.3)hit();
+      }else if(o.type==='branch'){
+        if(slideT<=0)hit();
+      }else if(o.type==='log'){
+        if(y<.75)hit();
+      }else{
+        if(Math.abs(m.position.x-tx)<1.25&&y<2.4)hit();
+      }
+    }
+    if(m.position.z>10){scene.remove(m);objs.splice(i,1)}
+  }
+
+  // animation
+  const f=run?(st==='play'?speed/14:.6):0;
+  legs.forEach(l=>{l.rotation.x=y>.05?(l.position.z<0?-.9:.9):Math.sin(t*14*f+l.userData.ph)*.9});
+  tail.rotation.y=Math.sin(t*6)*.4;
+  tiger.scale.y+=((slideT>0?.55:1)-tiger.scale.y)*Math.min(1,dt*18);
+  tiger.visible=!(inv>0)||Math.floor(t*14)%2===0;
+  const pl=st==='play'?1:0;
+  hunter.position.x+=(tiger.position.x*.8+1.3-hunter.position.x)*Math.min(1,dt*3);
+  hunter.position.z=1+gap*.3;hunter.position.y=Math.abs(Math.sin(t*12))*.08*pl;
+  hl.forEach(l=>l.rotation.x=Math.sin(t*12+l.userData.ph)*.8*pl);
+  $('bi').style.width=((gap-2.5)/6.5*100)+'%';
+  head.rotation.x=Math.sin(t*14*f)*.05;
+  body.position.y=1.05+(y>.05?0:Math.abs(Math.sin(t*14*f))*.07);
+  if(st==='over'){tiger.rotation.x+=(0.9-tiger.rotation.x)*dt*6;tiger.position.y=0}
+
+  // camera
+  shake=Math.max(0,shake-dt);
+  cam.position.set(tiger.position.x*.5+(Math.random()-.5)*shake*.6,4.3+y*.3,9);
+  cam.lookAt(tiger.position.x*.3,1.0,-8);
+  ren.render(scene,cam);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
